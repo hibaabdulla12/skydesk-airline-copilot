@@ -72,11 +72,14 @@ BENIGN_REMARKS = ["Vegetarian meal", "Prefers aisle seat", None, None, None, Non
 
 used_pnrs: set[str] = set()
 
+KEEP_TABLES = {"policy_chunks"}  # the policy knowledge base is not airline demo data
+
 
 def reset(session):
-    """Delete all rows, children first, so the script can be re-run."""
+    """Delete the airline demo rows, children first, so the script can be re-run."""
     for table in reversed(Base.metadata.sorted_tables):
-        session.execute(delete(table))
+        if table.name not in KEEP_TABLES:
+            session.execute(delete(table))
     session.commit()
 
 

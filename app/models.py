@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 from decimal import Decimal
-
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric,
     String, Text, Time, func,
@@ -89,3 +89,15 @@ class ActionLog(Base):
     action: Mapped[str] = mapped_column(String(40))
     pnr: Mapped[str | None] = mapped_column(String(6))
     details: Mapped[dict | None] = mapped_column(JSON)
+
+
+class PolicyChunk(Base):
+    """One section of the policy document, stored with its embedding (vector) for search."""
+    __tablename__ = "policy_chunks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(120))
+    part: Mapped[str] = mapped_column(String(120))
+    section: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(384))
