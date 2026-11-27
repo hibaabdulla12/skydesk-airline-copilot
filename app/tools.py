@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import date
 
-from app import services
+from app import entitlements, rag, services
 from app.db import SessionLocal
 
 log = logging.getLogger("skydesk.tools")
@@ -15,6 +15,10 @@ log = logging.getLogger("skydesk.tools")
 PNR = re.compile(r"[A-Z0-9]{6}")
 AIRPORT = re.compile(r"[A-Z]{3}")
 FLIGHT_NUMBER = re.compile(r"[A-Z]{2}[0-9]{1,4}")
+
+# Policy sections scoring below this are treated as "not relevant". Provisional value:
+# run  python -m scripts.tune_threshold  and set it from your own real scores.
+MIN_POLICY_SCORE = 0.55
 
 
 def _parse_day(text) -> date | None:
@@ -72,7 +76,47 @@ def search_alternative_flights(origin: str, destination: str, flight_date: str) 
     return {"flights": [f.model_dump(mode="json") for f in flights]}
 
 
-TOOLS = [get_booking, get_flight_status, search_alternative_flights]
+def search_policy(query: str) -> dict:
+    """Search the SkyDesk disruption policy for the rules that answer a question, for example
+    'hotel for an overnight delay' or 'compensation when a flight is cancelled because of weather'.
+    Returns the most relevant policy sections, each with a citation to quote.
+    If nothing relevant is found, results is empty and no entitlement may be stated."""
+    query = str(query).strip()
+    if not query or len(query) > 500:
+        return {"error": "query must be between 1 and 500 characters"}
+    with SessionLocal() as db:
+        hits = rag.search(db, query, k=4)
+    relevant = [hit for hit in hits if hit.score >= MIN_POLICY_SCORE]
+    if not relevant:
+        return {
+            "results": [],
+            "note": "No relevant policy section found. Do not state any entitlement; refer the case to the duty manager.",
+        }
+    return {
+        "results": [
+            {"citation": f"{hit.source} §{hit.section}", "title": hit.title, "text": hit.content, "score": hit.score}
+            for hit in relevant
+        ]
+    }
+
+
+def calculate_entitlements(pnr: str) -> dict:
+    """Work out what a disrupted booking is entitled to under the policy: meal voucher, refund option, hotel,
+    cash compensation with the exact amount, rebooking priority and special handling. Use this for every
+    amount and every yes/no about eligibility, and never work them out yourself. Each entitlement has a status
+    (applies, does_not_apply or needs_confirmation), an amount in INR if any, a policy citation and a reason.
+    needs_confirmation means a human agent must confirm it."""
+    pnr = str(pnr).strip().upper()
+    if not PNR.fullmatch(pnr):
+        return {"error": "PNR must be exactly 6 letters or digits"}
+    with SessionLocal() as db:
+        booking = services.get_booking(db, pnr)
+    if booking is None:
+        return {"error": f"No booking found for PNR {pnr}"}
+    return entitlements.calculate(booking).model_dump(mode="json")
+
+
+TOOLS = [get_booking, get_flight_status, search_alternative_flights, search_policy, calculate_entitlements]
 TOOL_MAP = {tool.__name__: tool for tool in TOOLS}
 
 
