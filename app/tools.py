@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import date
 
-from app import entitlements, rag, services
+from app import actions, entitlements, rag, services
 from app.db import SessionLocal
 
 log = logging.getLogger("skydesk.tools")
@@ -116,7 +116,25 @@ def calculate_entitlements(pnr: str) -> dict:
     return entitlements.calculate(booking).model_dump(mode="json")
 
 
-TOOLS = [get_booking, get_flight_status, search_alternative_flights, search_policy, calculate_entitlements]
+def propose_action(pnr: str, action: str, flight_number: str = "", flight_date: str = "") -> dict:
+    """Propose an action on a booking for a human to approve. This does NOT carry the action out: a person
+    approves or rejects it in the Pending approvals panel. action must be one of: issue_meal_voucher, book_hotel,
+    rebook, refund, pay_compensation. For rebook, also give flight_number (like SD216) and flight_date
+    (YYYY-MM-DD) of the new flight. The amount is set by the system, never by you. Propose only what the
+    human agent asked you to arrange."""
+    pnr = str(pnr).strip().upper()
+    if not PNR.fullmatch(pnr):
+        return {"error": "PNR must be exactly 6 letters or digits"}
+    day = None
+    if flight_date:
+        day = _parse_day(flight_date)
+        if day is None:
+            return {"error": "flight_date must be in YYYY-MM-DD format"}
+    return actions.propose_now(pnr, str(action).strip(), str(flight_number).strip().upper(), day)
+
+
+TOOLS = [get_booking, get_flight_status, search_alternative_flights, search_policy, calculate_entitlements,
+         propose_action]
 TOOL_MAP = {tool.__name__: tool for tool in TOOLS}
 
 
